@@ -1,13 +1,9 @@
 # ORCID synchronization as part of the ORCID integration
 
-This code ...
+This code realises the data synchronization from and to the ORCID platform. 
+This code relates to the REST API of the Metadata Management System (MMS) and requires a Redis database for storing the `orcid_put_codes` as provenance data.
 
-More information on the ORCID API under https://pub.sandbox.orcid.org/v2.0/ and https://api.sandbox.orcid.org/v2.0/ \
-More information on the response data:
-- XML structure: http://members.orcid.org/api/record-xml-structure
-- XML orcid works: http://members.orcid.org/api/xml-orcid-works
-- supported work types: http://members.orcid.org/api/supported-work-types
-
+More information coming soon ... or contact us.
 
 This code is licenced under the MIT Licence.
 
