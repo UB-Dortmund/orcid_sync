@@ -23,7 +23,6 @@
 import datetime
 import logging
 from logging.handlers import RotatingFileHandler
-import orcid
 import simplejson as json
 import redis
 import requests
@@ -50,34 +49,84 @@ handler.setFormatter(log_formatter)
 logger.addHandler(handler)
 
 # ---- ORCID functions ---- #
-# see also: https://github.com/ORCID/ORCID-Source/tree/master/orcid-model/src/main/resources/record_2.0
+# see also: https://github.com/ORCID/ORCID-Source/blob/master/orcid-model/src/main/resources/record_2.0/README.md
+
+
+def _orcid_api_get_request(affiliation='', orcid_id='', access_token='', section='', put_code=None):
+
+    sandbox = '.sandbox'
+    if affiliation and not secrets.ORCID_API_DATA.get(affiliation).get('sandbox'):
+        sandbox = ''
+
+    endpoint = 'https://api%s.orcid.org/v2.0/%s/%s' % (sandbox, orcid_id, section)
+    if put_code:
+        endpoint += '/%s' % put_code
+
+    return requests.get(endpoint, headers={'Accept': 'application/json', 'Authorization': 'Bearer %s' % access_token}).json()
+
+
+def _orcid_api_post_request(affiliation='', orcid_id='', access_token='', section='', put_code=None, data=''):
+
+    sandbox = '.sandbox'
+    if affiliation and not secrets.ORCID_API_DATA.get(affiliation).get('sandbox'):
+        sandbox = ''
+
+    endpoint = 'https://api%s.orcid.org/v2.0/%s/%s' % (sandbox, orcid_id, section)
+    if put_code:
+        endpoint += '/%s' % put_code
+
+    if data:
+        response = requests.post(endpoint, headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': 'Bearer %s' % access_token}, data=data)
+
+        if response.status_code == 200 or response.status_code == 201:
+
+            logger.info(response.status_code)
+            logger.info(response.headers)
+            logger.info(response.content.decode("utf-8"))
+            return response.headers.get('Location').split('%s/' % section)[1]
+        else:
+            logger.error(response.status_code)
+            logger.error(response.text)
+            logger.error(response.content.decode("utf-8"))
+            logger.error(json.dumps(json.loads(data), indent=2))
+            return None
+    else:
+        logger.error('no data to post: ' % data)
+        return None
+
+
+def _orcid_api_put_request(affiliation='', orcid_id='', access_token='', section='', put_code=None, data=''):
+
+    sandbox = '.sandbox'
+    if affiliation and not secrets.ORCID_API_DATA.get(affiliation).get('sandbox'):
+        sandbox = ''
+
+    endpoint = 'https://api%s.orcid.org/v2.0/%s/%s' % (sandbox, orcid_id, section)
+    if put_code:
+        endpoint += '/%s' % put_code
+
+    if data:
+        response = requests.put(endpoint, headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': 'Bearer %s' % access_token}, data=data)
+
+        if response.status_code != 200:
+
+            logger.error(response.status_code)
+            logger.error(response.content.decode("utf-8"))
+            logger.error(json.dumps(json.loads(data), indent=2))
+    else:
+        logger.error('no data to put: ' % data)
 
 
 def orcid_user_info(affiliation='', orcid_id='', access_token=''):
 
-    if affiliation:
-        info = {}
-        info.setdefault('orcid', orcid_id)
+    try:
+        # get public_info from orcid
+        public_info = _orcid_api_get_request(affiliation=affiliation, orcid_id=orcid_id, section='person', access_token=access_token)
 
-        sandbox = secrets.ORCID_API_DATA.get(affiliation).get('sandbox')
-        client_id = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_id')
-        client_secret = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_secret')
-        if not sandbox:
-            client_id = secrets.ORCID_API_DATA.get(affiliation).get('client_id')
-            client_secret = secrets.ORCID_API_DATA.get(affiliation).get('client_secret')
+        return public_info
 
-        api = orcid.MemberAPI(client_id, client_secret, sandbox=sandbox)
-
-        try:
-            # get public_info from orcid
-            public_info = api.read_record_public(orcid_id=orcid_id, request_type='person', token=access_token)
-            return public_info
-
-        except RequestException as e:
-            logging.error('ORCID-ERROR: %s' % e.response.text)
-
-    else:
-        logging.error('Bad request: affiliation has no value!')
+    except RequestException as e:
+        logger.error('ORCID-ERROR: %s' % e.response.text)
 
 
 def orcid_add_records(affiliation='', orcid_id='', access_token='', works=None):
@@ -86,97 +135,17 @@ def orcid_add_records(affiliation='', orcid_id='', access_token='', works=None):
 
     if works:
 
-        if affiliation:
-            sandbox = secrets.ORCID_API_DATA.get(affiliation).get('sandbox')
-            client_id = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_id')
-            client_secret = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_secret')
-            if not sandbox:
-                client_id = secrets.ORCID_API_DATA.get(affiliation).get('client_id')
-                client_secret = secrets.ORCID_API_DATA.get(affiliation).get('client_secret')
+        for record_id in works.keys():
+            # logger.info('work: %s' % work)
 
-            api = orcid.MemberAPI(client_id, client_secret, sandbox=sandbox)
+            work = works.get(record_id)[0]
+            # print(work)
 
-            for record_id in works.keys():
-                # logging.info('work: %s' % work)
+            try:
+                put_code = _orcid_api_post_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='work', data=json.dumps(work))
 
-                work = works.get(record_id)[0]
-                # print(work)
-
-                try:
-                    put_code = api.add_record(orcid_id=orcid_id, token=access_token, request_type='work',
-                                              data=work)
-
-                    if put_code:
-                        orcid_record = api.read_record_member(orcid_id=orcid_id, request_type='work',
-                                                              token=access_token, put_code=put_code)
-                        update_json = {}
-                        orcid_sync = {
-                            'orcid_id': orcid_id,
-                            'orcid_put_code': str(put_code),
-                            'orcid_visibility': orcid_record.get('visibility')
-                        }
-                        update_json['orcid_sync'] = [orcid_sync]
-
-                        logger.info('PUT /work/%s' % record_id)
-                        # PUT request
-                        logger.info(update_json)
-                        try:
-                            # put data
-                            response = requests.put(
-                                '%s/%s/%s' % (secrets.MMS_API, 'work', record_id),
-                                headers={
-                                    'Content-Type': 'application/json',
-                                    'Authorization': 'Bearer %s' % secrets.MMS_API_TOKEN
-                                },
-                                data=json.dumps(update_json)
-                                )
-                            status = response.status_code
-                            logger.info('STATUS: %s' % status)
-                            if status == 200:
-                                response_json = json.loads(response.content.decode("utf-8"))
-                                # logger.info(response_json.get('work'))
-                                if response_json.get('message'):
-                                    logger.info(response_json.get('message'))
-                            else:
-                                logger.error('ERROR: %s: %s' % (status, response.content.decode("utf-8")))
-
-                        except requests.exceptions.ConnectionError as e:
-                            logging.error(e)
-                except RequestException as e:
-                    logging.error('ORCID-ERROR: %s' % e.response.text)
-        else:
-            logging.error('Bad request: affiliation has no value!')
-
-
-def orcid_update_records(affiliation='', orcid_id='', access_token='', works=None):
-    if works is None:
-        works = {}
-
-    if works:
-
-        if affiliation:
-            sandbox = secrets.ORCID_API_DATA.get(affiliation).get('sandbox')
-            client_id = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_id')
-            client_secret = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_secret')
-            if not sandbox:
-                client_id = secrets.ORCID_API_DATA.get(affiliation).get('client_id')
-                client_secret = secrets.ORCID_API_DATA.get(affiliation).get('client_secret')
-
-            api = orcid.MemberAPI(client_id, client_secret, sandbox=sandbox)
-
-            for record_id in works.keys():
-                # logging.info('work: %s' % work)
-
-                work = works.get(record_id)[0]
-                # print(json.dumps(work, indent=4))
-
-                try:
-                    put_code = int(record_id)
-                    api.update_record(orcid_id=orcid_id, token=access_token,
-                                      request_type='work', put_code=put_code, data=work)
-
-                    orcid_record = api.read_record_member(orcid_id=orcid_id, request_type='work',
-                                                          token=access_token, put_code=put_code)
+                if put_code:
+                    orcid_record = _orcid_api_get_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='work', put_code=put_code)
                     update_json = {}
                     orcid_sync = {
                         'orcid_id': orcid_id,
@@ -192,10 +161,12 @@ def orcid_update_records(affiliation='', orcid_id='', access_token='', works=Non
                         # put data
                         response = requests.put(
                             '%s/%s/%s' % (secrets.MMS_API, 'work', record_id),
-                            headers={'Content-Type': 'application/json',
-                                     'Authorization': 'Bearer %s' % secrets.MMS_API_TOKEN},
+                            headers={
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer %s' % secrets.MMS_API_TOKEN
+                            },
                             data=json.dumps(update_json)
-                        )
+                            )
                         status = response.status_code
                         logger.info('STATUS: %s' % status)
                         if status == 200:
@@ -207,44 +178,83 @@ def orcid_update_records(affiliation='', orcid_id='', access_token='', works=Non
                             logger.error('ERROR: %s: %s' % (status, response.content.decode("utf-8")))
 
                     except requests.exceptions.ConnectionError as e:
-                        logging.error(e)
+                        logger.error(e)
+            except RequestException as e:
+                logger.error('ORCID-ERROR: %s' % e.response.text)
 
-                except RequestException as e:
-                    logging.error('ORCID-ERROR: %s' % e.response.text)
 
-        else:
-            logging.error('Bad request: affiliation has no value!')
+def orcid_update_records(affiliation='', orcid_id='', access_token='', works=None):
+    if works is None:
+        works = {}
+
+    if works:
+
+        for record_id in works.keys():
+            # logger.info('work: %s' % work)
+
+            work = works.get(record_id).get('orcid_record')[0]
+            # print(json.dumps(work, indent=4))
+
+            try:
+                logger.debug('record_id: %s' % record_id)
+                logger.debug('id type: %s' % type(record_id))
+                logger.debug('work_id: %s' % works.get(record_id).get('record_id'))
+                put_code = int(record_id)
+                _orcid_api_put_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='work', put_code=put_code, data=json.dumps(work))
+
+                orcid_record = _orcid_api_get_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='work', put_code=put_code)
+                update_json = {}
+                orcid_sync = {
+                    'orcid_id': orcid_id,
+                    'orcid_put_code': str(put_code),
+                    'orcid_visibility': orcid_record.get('visibility')
+                }
+                update_json['orcid_sync'] = [orcid_sync]
+
+                logger.info('PUT /work/%s' % record_id)
+                # PUT request
+                logger.info(update_json)
+                try:
+                    # put data
+                    response = requests.put(
+                        '%s/%s/%s' % (secrets.MMS_API, 'work', record_id),
+                        headers={'Content-Type': 'application/json',
+                                 'Authorization': 'Bearer %s' % secrets.MMS_API_TOKEN},
+                        data=json.dumps(update_json)
+                    )
+                    status = response.status_code
+                    logger.info('STATUS: %s' % status)
+                    if status == 200:
+                        response_json = json.loads(response.content.decode("utf-8"))
+                        # logger.info(response_json.get('work'))
+                        if response_json.get('message'):
+                            logger.info(response_json.get('message'))
+                    else:
+                        logger.error('ERROR: %s: %s' % (status, response.content.decode("utf-8")))
+
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(e)
+
+            except RequestException as e:
+                logger.error('ORCID-ERROR: %s' % e.response.text)
 
 
 def orcid_add_external_id(affiliation='', orcid_id='', access_token='', external_id=None):
 
     put_code = ''
 
-    if affiliation:
-        sandbox = secrets.ORCID_API_DATA.get(affiliation).get('sandbox')
-        client_id = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_id')
-        client_secret = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_secret')
-        if not sandbox:
-            client_id = secrets.ORCID_API_DATA.get(affiliation).get('client_id')
-            client_secret = secrets.ORCID_API_DATA.get(affiliation).get('client_secret')
+    try:
 
-        api = orcid.MemberAPI(client_id, client_secret, sandbox=sandbox)
+        logger.info('external_id: %s' % external_id)
 
-        try:
+        put_code = _orcid_api_post_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='external-identifiers', data=external_id)
 
-            logging.info('external_id: %s' % external_id)
+        # get info from orcid again
+        info = _orcid_api_get_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='external-identifiers', put_code=put_code)
+        logger.info('info: %s' % info)
 
-            put_code = api.add_record(orcid_id=orcid_id, token=access_token, request_type='external-identifiers',
-                                      data=external_id)
-
-            # get info from orcid again
-            info = api.read_record_member(orcid_id=orcid_id, request_type='external-identifiers', token=access_token)
-            logging.info('info: %s' % info)
-
-        except RequestException as e:
-            logging.error('ORCID-ERROR: %s' % e.response.text)
-    else:
-        logging.error('Bad request: affiliation has no value!')
+    except RequestException as e:
+        logger.error('ORCID-ERROR: %s' % e.response.text)
 
     return put_code
 
@@ -253,36 +263,22 @@ def orcid_read_works(affiliation='', orcid_id='', access_token=''):
 
     works = []
 
-    if affiliation:
-        sandbox = secrets.ORCID_API_DATA.get(affiliation).get('sandbox')
-        client_id = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_id')
-        client_secret = secrets.ORCID_API_DATA.get(affiliation).get('sandbox_client_secret')
-        if not sandbox:
-            client_id = secrets.ORCID_API_DATA.get(affiliation).get('client_id')
-            client_secret = secrets.ORCID_API_DATA.get(affiliation).get('client_secret')
+    try:
 
-        api = orcid.MemberAPI(client_id, client_secret, sandbox=sandbox)
+        works = _orcid_api_get_request(affiliation=affiliation, orcid_id=orcid_id, access_token=access_token, section='works')
+        works = works.get('group')
 
-        try:
-
-            info = api.read_record_member(orcid_id=orcid_id, request_type='activities', token=access_token)
-            # logging.info('info: %s' % info)
-            works = info.get('works').get('group')
-
-        except RequestException as e:
-            logging.error('ORCID-ERROR: %s' % e.response.text)
-
-    else:
-        logging.error('Bad request: affiliation has no value!')
+    except RequestException as e:
+        logger.error('ORCID-ERROR: %s' % e.response.text)
 
     return works
 
 
 # ---- MMS functions ---- #
 
-def get_new_records(affiliation='', query='*:*'):
+def get_new_records(affiliation='', orcid_id=''):
 
-    query_string = 'q=%s AND -orcid_put_code:[\'\' TO *]' % query
+    query_string = 'q=orcid:%s AND -orcid_put_code:[\'\' TO *]' % orcid_id
     rows = 100000
 
     orcid_records = {}
@@ -299,19 +295,20 @@ def get_new_records(affiliation='', query='*:*'):
                     orcid_records.setdefault(record.get('id'),
                                              orcid_mms.mms2orcid(affiliation=affiliation, mms_records=[record]))
             else:
-                logging.info('No records found for query: %s' % query)
+                logger.info('No records found for orcid_id: %s' % orcid_id)
         else:
-            logging.info('No records found for query: %s' % query)
+            logger.info('No records found for orcid_id: %s' % orcid_id)
+            logger.info('message: %s - %s' % (status, response.content.decode('utf8')))
 
     except requests.exceptions.ConnectionError as e:
-        logging.error(e)
+        logger.error(e)
 
     return orcid_records
 
 
-def get_updated_records(affiliation='', query='*:*'):
+def get_updated_records(affiliation='', orcid_id=''):
 
-    query_string = 'q=%s AND orcid_put_code:[\'\' TO *]' % query
+    query_string = 'q=orcid:%s AND orcid_put_code:[\'\' TO *]' % orcid_id
     rows = 100000
 
     orcid_records = {}
@@ -325,15 +322,26 @@ def get_updated_records(affiliation='', query='*:*'):
 
             if records:
                 for record in records:
-                    orcid_records.setdefault(record.get('id'),
-                                             orcid_mms.mms2orcid(affiliation=affiliation, mms_records=[record]))
+                    # search for the matching put_code
+                    put_code = None
+                    for orcid_data in record.get('orcid_sync'):
+                        if orcid_id == orcid_data.get('orcid_id'):
+                            put_code = orcid_data.get('orcid_put_code')
+                            break
+
+                    if put_code:
+                        put_record = orcid_mms.mms2orcid(affiliation=affiliation, mms_records=[record])
+                        put_record[0]['put-code'] = put_code
+                        orcid_records.setdefault(put_code, {'record_id': record.get('id'), 'orcid_record': put_record})
+                    else:
+                        logger.error('data error in mms! orcid_data in index but not in record itself. (record %s)' % record.get('id'))
             else:
-                logging.info('No records found for query: %s' % query)
+                logger.info('No records found for orcid_id: %s' % orcid_id)
         else:
-            logging.info('No records found for query: %s' % query)
+            logger.info('No records found for orcid_id: %s' % orcid_id)
 
     except requests.exceptions.ConnectionError as e:
-        logging.error(e)
+        logger.error(e)
 
     return orcid_records
 
@@ -352,8 +360,8 @@ def dict_compare(d1, d2):
     return added, removed, modified, same
 
 
-# ---- ORCID plattform to HB 2 ---- #
-def sync_orcid_to_hb(orcid_id=''):
+# ---- ORCID plattform to MMS ---- #
+def sync_orcid_to_mms(orcid_id=''):
     try:
         response = requests.get('%s/%s/%s' % (secrets.MMS_API, 'user', orcid_id),
                                 headers={'Accept': 'application/json', 'Authorization': 'Bearer %s' % secrets.MMS_API_TOKEN},
@@ -554,7 +562,7 @@ def sync_orcid_to_hb(orcid_id=''):
                                             else:
                                                 logger.error('ERROR: %s: %s' % (status, response.content.decode("utf-8")))
                                         except requests.exceptions.ConnectionError as e:
-                                            logging.error(e)
+                                            logger.error(e)
                                 else:
                                     logger.error("This isn't possible! (break=record available without data)")
                             else:
@@ -757,20 +765,20 @@ def sync_orcid_to_hb(orcid_id=''):
                                                 logger.error('ERROR: %s: %s' % (status, response.content.decode("utf-8")))
 
                                         except requests.exceptions.ConnectionError as e:
-                                            logging.error(e)
+                                            logger.error(e)
 
                                         sources.set('orcid:%s' % work_sum.get('put-code'), str(datetime.datetime.now())[:-3])
             else:
-                logging.error('user response not valid for %s' % orcid_id)
+                logger.error('user response not valid for %s' % orcid_id)
         else:
-            logging.error('user %s not found' % orcid_id)
+            logger.error('user %s not found' % orcid_id)
 
     except requests.exceptions.ConnectionError as e:
-        logging.error(e)
+        logger.error(e)
 
 
-# ---- HB 2 to ORCID plattform ---- #
-def sync_hb_to_orcid(orcid_id=''):
+# ---- MMS to ORCID plattform ---- #
+def sync_mms_to_orcid(orcid_id=''):
     if orcid_id:
         try:
             response = requests.get('%s/%s/%s' % (secrets.MMS_API, 'user', orcid_id),
@@ -783,39 +791,44 @@ def sync_hb_to_orcid(orcid_id=''):
                 if user:
                     if '/activities/update' in user.get('orcidscopes'):
                         # add new records to orcid
-                        records = get_new_records(affiliation=user.get('affiliation'),
-                                                  query='orcid:%s' % orcid_id)
+                        records = get_new_records(affiliation=user.get('affiliation'), orcid_id=orcid_id)
                         orcid_add_records(affiliation=user.get('affiliation'), orcid_id=orcid_id,
                                           access_token=user.get('orcidaccesstoken'), works=records)
                         # update records in orcid
-                        records = get_updated_records(affiliation=user.get('affiliation'),
-                                                      query='orcid:%s' % orcid_id)
+                        records = get_updated_records(affiliation=user.get('affiliation'), orcid_id=orcid_id)
                         orcid_update_records(affiliation=user.get('affiliation'), orcid_id=orcid_id,
                                              access_token=user.get('orcidaccesstoken'), works=records)
                 else:
-                    logging.error('user response not valid for %s' % orcid_id)
+                    logger.error('user response not valid for %s' % orcid_id)
             else:
-                logging.error('user %s not found' % orcid_id)
+                logger.error('user %s not found' % orcid_id)
 
         except requests.exceptions.ConnectionError as e:
-            logging.error(e)
+            logger.error(e)
 
 
 ###################################################
 
 if __name__ == "__main__":
 
+    # print(orcid_add_external_id(affiliation='tudo', orcid_id='0000-0003-0432-294X', access_token='8bde38f6-66a4-4346-b517-3af7134d740a', external_id={'external-identifiers': {'external-identifier': [{'external-id-type': 'Test', 'external-id-value': 'Bla ;-)'}]}}))
+
     sources = redis.StrictRedis(host=secrets.REDIS_SOURCE_IDS_HOST,
                                 port=secrets.REDIS_SOURCE_IDS_PORT,
                                 db=secrets.REDIS_SOURCE_IDS_DB)
 
     print('size of source directory: %s' % sources.dbsize())
+    # sources.flushdb()
+    # print('size of source directory: %s' % sources.dbsize())
 
-    # sync ORCID works to HB2
-    sync_orcid_to_hb(orcid_id='0000-0002-5643-8074')
+    if secrets.IDS_FOR_SYNC_TO_ORCID:
+        for item in secrets.IDS_FOR_SYNC_TO_ORCID:
+            sync_mms_to_orcid(orcid_id=item)
+
+    if secrets.IDS_FOR_SYNC_TO_MMS:
+        for item in secrets.IDS_FOR_SYNC_TO_MMS:
+            sync_orcid_to_mms(orcid_id=item)
 
     print('size of source directory: %s' % sources.dbsize())
 
 
-    # sync HB2 works to ORCID
-    # sync_hb_to_orcid(orcid_id='0000-0002-7349-3032')
