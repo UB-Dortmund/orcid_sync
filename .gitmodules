@@ -1,9 +1,9 @@
 [submodule "orcid_mms"]
 	path = orcid_mms
-	url = ../orcid_mms
+	url = https://github.com/UB-Dortmund/orcid_mms
 [submodule "crossref2mms"]
 	path = crossref2mms
-	url = ../crossref2mms
+	url = https://github.com/UB-Dortmund/crossref2mms
 [submodule "datacite2mms"]
 	path = datacite2mms
-	url = ../datacite2mms
+	url = https://github.com/UB-Dortmund/datacite2mms
