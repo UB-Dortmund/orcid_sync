@@ -32,6 +32,8 @@ from urllib import parse
 import os
 import sys
 sys.path.append('%s/orcid_sync/crossref2mms' % os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append('%s/orcid_sync/datacite2mms' % os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append('%s/orcid_sync/orcid_mms' % os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from crossref2mms import crossref2mms
 from datacite2mms import datacite2mms
