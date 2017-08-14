@@ -48,10 +48,9 @@ handler.setFormatter(log_formatter)
 
 logger.addHandler(handler)
 
-# ---- ORCID functions ---- #
+
 # see also: https://github.com/ORCID/ORCID-Source/blob/master/orcid-model/src/main/resources/record_2.0/README.md
-
-
+# --- request helper ---- #
 def _orcid_api_get_request(affiliation='', orcid_id='', access_token='', section='', put_code=None):
 
     sandbox = '.sandbox'
@@ -117,6 +116,54 @@ def _orcid_api_put_request(affiliation='', orcid_id='', access_token='', section
         logger.error('no data to put: ' % data)
 
 
+# ---- ORCID functions ---- #
+def orcid_login_url(affiliation=None, email=None, scopes=None):
+    # see also: https://members.orcid.org/api/tutorial/get-orcid-id
+    if affiliation:
+
+        sandbox = 'sandbox.'
+        if not secrets.ORCID_API_DATA.get(affiliation).get('sandbox'):
+            sandbox = ''
+
+        if not isinstance(scopes, str):
+            scopes = " ".join(sorted(set(scopes)))
+
+        data = [("client_id", secrets.ORCID_API_DATA.get(affiliation).get('client_id')), ("scope", scopes),
+                ("response_type", "code"),
+                ("redirect_uri", secrets.ORCID_API_DATA.get(affiliation).get('redirect_uri'))]
+
+        if email:
+            data.append(("email", email))
+
+        return 'https://%sorcid.org/oauth/authorize?%s' % (sandbox, parse.urlencode(data))
+    else:
+        return ''
+
+
+def orcid_get_token(affiliation='', code=''):
+    # see also: https://members.orcid.org/api/tutorial/get-orcid-id
+    if affiliation:
+        sandbox = 'sandbox.'
+        if not secrets.ORCID_API_DATA.get(affiliation).get('sandbox'):
+            sandbox = ''
+
+        data = {
+            'client_id': secrets.ORCID_API_DATA.get(affiliation).get('client_id'),
+            'client_secret': secrets.ORCID_API_DATA.get(affiliation).get('client_secret'),
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': secrets.ORCID_API_DATA.get(affiliation).get('redirect_uri')
+        }
+
+        endpoint = 'https://%sorcid.org/oauth/token' % sandbox
+
+        return requests.post(endpoint, headers={'Accept': 'application/json'}, data=data).json()
+
+    else:
+        return ''
+
+
+# ---- ORCID functions ---- #
 def orcid_user_info(affiliation='', orcid_id='', access_token=''):
 
     try:
@@ -811,8 +858,6 @@ def sync_mms_to_orcid(orcid_id=''):
 
 if __name__ == "__main__":
 
-    # print(orcid_add_external_id(affiliation='tudo', orcid_id='0000-0003-0432-294X', access_token='8bde38f6-66a4-4346-b517-3af7134d740a', external_id={'external-identifiers': {'external-identifier': [{'external-id-type': 'Test', 'external-id-value': 'Bla ;-)'}]}}))
-
     sources = redis.StrictRedis(host=secrets.REDIS_SOURCE_IDS_HOST,
                                 port=secrets.REDIS_SOURCE_IDS_PORT,
                                 db=secrets.REDIS_SOURCE_IDS_DB)
@@ -830,5 +875,4 @@ if __name__ == "__main__":
             sync_orcid_to_mms(orcid_id=item)
 
     print('size of source directory: %s' % sources.dbsize())
-
 
