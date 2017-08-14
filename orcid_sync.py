@@ -29,6 +29,10 @@ import requests
 from requests import RequestException
 from urllib import parse
 
+import os
+import sys
+sys.path.append('%s/orcid_sync/crossref2mms' % os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from crossref2mms import crossref2mms
 from datacite2mms import datacite2mms
 from orcid_mms import orcid_mms
