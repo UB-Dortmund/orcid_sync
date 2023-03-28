@@ -1,3 +1,6 @@
+**HINT: This project is out of date and internally not relevant anymore!**
+
+
 # ORCID synchronization as part of the ORCID integration
 
 This code realises the data synchronization from and to the ORCID platform. 
